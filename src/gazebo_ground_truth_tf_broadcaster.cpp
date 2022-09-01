@@ -7,8 +7,34 @@
 
 #include <nav_msgs/Odometry.h>
 
+#include <fstream>
+
+geometry_msgs::Vector3 getEstimateTfOdom(tf2_ros::Buffer *tf_buffer) {
+  geometry_msgs::TransformStamped transformStamped;
+  while (not tf_buffer->canTransform("map", "base_footprint", ros::Time::now(),
+                                     ros::Duration(0.1))) {
+  };
+  try {
+    transformStamped = tf_buffer->lookupTransform(
+        "map", "base_footprint", ros::Time::now() - ros::Duration(0.1));
+  } catch (tf2::TransformException &ex) {
+    ROS_WARN("%s", ex.what());
+  }
+  return transformStamped.transform.translation;
+}
+
+void writeCsvTfPose(geometry_msgs::Point ground_truth_tf_odom,
+                    tf2_ros::Buffer *tf_buffer) {
+  auto EstimateTfOdom = getEstimateTfOdom(tf_buffer);
+  std::ofstream ofs;
+  ofs.open("odom_comparison_data.csv", std::ios::app);
+  ofs << ground_truth_tf_odom.x << ", " << ground_truth_tf_odom.y << ", "
+      << EstimateTfOdom.x << ", " << EstimateTfOdom.y << "\n";
+}
+
 void broadcasteTfGroundTruth(const nav_msgs::Odometry::ConstPtr &msg,
-                             tf2_ros::TransformBroadcaster &tf_broadcaster) {
+                             tf2_ros::TransformBroadcaster &tf_broadcaster,
+                             tf2_ros::Buffer *tf_buffer) {
 
   geometry_msgs::TransformStamped map2odom;
 
@@ -40,6 +66,8 @@ void broadcasteTfGroundTruth(const nav_msgs::Odometry::ConstPtr &msg,
 
   odom2base_footprint.header.stamp = ros::Time::now();
   tf_broadcaster.sendTransform(odom2base_footprint);
+
+  writeCsvTfPose(msg->pose.pose.position, tf_buffer);
 }
 
 int main(int argc, char **argv) {
@@ -51,7 +79,8 @@ int main(int argc, char **argv) {
   tf2_ros::TransformListener tf_listener(tf_buffer);
 
   ros::Subscriber odom_sub = nh.subscribe<nav_msgs::Odometry>(
-      "/odom", 1, boost::bind(broadcasteTfGroundTruth, _1, tf_broadcaster));
+      "/odom", 1,
+      boost::bind(broadcasteTfGroundTruth, _1, tf_broadcaster, &tf_buffer));
 
   ros::spin();
 };
